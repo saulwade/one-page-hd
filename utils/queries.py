@@ -4,22 +4,25 @@ import pandas as pd
 import sqlite3
 
 def get_df_itd():
-    # Leer la base de datos
+    # Leer base de datos
     conn = sqlite3.connect("db/inventarios.db")
     df_db = pd.read_sql("SELECT * FROM data_one_page", conn)
     conn.close()
 
-    # Asegurar tipos correctos
+    # Preparar tipos
     df_db["tienda"] = df_db["tienda"].astype(str).str.strip()
     df_db["Semana3"] = pd.to_numeric(df_db["Semana3"], errors="coerce").astype("Int64")
     df_db["Año"] = pd.to_numeric(df_db["Año"], errors="coerce").astype("Int64")
 
-    # Leer el archivo de rangos
+    # Leer rangos
     df_rangos = pd.read_csv("config/rango_inventarios.csv")
     df_rangos["tienda"] = df_rangos["tienda"].astype(str).str.strip()
+    df_rangos["semana_inicio"] = pd.to_numeric(df_rangos["semana_inicio"], errors="coerce") + 1  # ✅ sumamos 1 a todas
 
-    df_rangos["semana_inicio"] = pd.to_numeric(df_rangos["semana_inicio"], errors="coerce") + 1
-
+    # Leer planes
+    df_planes = pd.read_excel("config/Planes por tienda.xlsx")
+    df_planes["tienda"] = df_planes["#"].astype(str).str.strip()
+    df_planes = df_planes[["tienda", "Plan MC", "Plan MNC", "Plan MT"]]
 
     resultados = []
 
@@ -51,23 +54,34 @@ def get_df_itd():
         df_filtrado = df_tienda[(df_tienda["orden"] >= lim_inf) & (df_tienda["orden"] <= lim_sup)]
 
         total_mc = df_filtrado["MC+"].sum()
+        total_mnc = df_filtrado["MNC +"].sum()
+        total_mt = df_filtrado["MT +"].sum()
         total_ventas = df_filtrado["Sales $"].sum()
 
-        mc_ponderado = round((total_mc / total_ventas) * 100, 2) if total_ventas else None
+        mc_pond = round((total_mc / total_ventas) * 100, 2) if total_ventas else None
+        mnc_pond = round((total_mnc / total_ventas) * 100, 2) if total_ventas else None
+        mt_pond = round((total_mt / total_ventas) * 100, 2) if total_ventas else None
 
         resultados.append({
             "tienda": tienda,
-            "semana_inicio": semana_ini,
-            "año_inicio": año_ini,
-            "semana_fin": semana_fin,
-            "año_fin": año_fin,
-            "MC acumulado": total_mc,
-            "Ventas acumuladas": total_ventas,
-            "MC% ponderado": mc_ponderado
+            "MC %": mc_pond,
+            "MNC %": mnc_pond,
+            "MT %": mt_pond
         })
 
-    df_itd = pd.DataFrame(resultados)
-    df_itd["semana_inicio"] = df_itd["semana_inicio"].astype("Int64")
-    df_itd["semana_fin"] = df_itd["semana_fin"].astype("Int64")
+    df_resultado = pd.DataFrame(resultados)
 
-    return df_itd
+    # Unir con planes
+    df_final = df_resultado.merge(df_planes, how="left", on="tienda")
+
+    # Reordenar y renombrar columnas
+    df_final = df_final[[
+        "tienda", "MC %", "Plan MC", "MNC %", "Plan MNC", "MT %", "Plan MT"
+    ]].rename(columns={
+        "tienda": "Distrito / Tienda",
+        "Plan MC": "MC% Plan",
+        "Plan MNC": "MNC % Plan",
+        "Plan MT": "MT % Plan"
+    })
+
+    return df_final
